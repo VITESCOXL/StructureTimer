@@ -1,0 +1,49 @@
+
+<!-- #include tool-h3 gui\blocks\tool-h3.htm;image=#image;colspan=3;1; -->
+
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+  <td colspan='3'>
+    <table width='100%' border='0' cellpadding='4' cellspacing='0'>
+      <tr style='background-color: #f0f0f0;'>
+        <td width='30%' style='padding:6px; text-align:center;'><b>Molecule</b></td>
+        <td width='18%' style='padding:6px; text-align:center;'><b>Work Time</b></td>
+        <td width='18%' style='padding:6px; text-align:center;'><b>Idle Time</b></td>
+        <td width='18%' style='padding:6px; text-align:center;'><b>Total Time</b></td>
+        <td width='16%' style='padding:6px; text-align:center;'><b>Status</b></td>
+      </tr>
+      $spy.StructTimer.get_timing_history()
+    </table>
+  </td>
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+  <td ALIGN='left' colspan='3'>
+    <small><i>Current molecule is highlighted in blue.</i></small>
+  </td>
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+  <td ALIGN='center' colspan='3'>
+    <a href="spy.StructTimer.reset_current_timing()"><b>Reset Current Molecule</b></a>
+  </td>
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->
+
+  <td colspan='3'>
+    $+
+    html.Snippet(GetVar(default_link),
+    "value=Reload Plugin",
+    "onclick=py.run C:\Program Files\Olex2-1.5/util/pyUtil/PluginLib//plugin-StructTimer/StructTimer.py",
+    )$-
+
+    $+
+    html.Snippet(GetVar(default_link),
+    "value=Settings",
+    "onclick=spy.EditParams(structtimer)",
+    )$-
+
+    $+
+    html.Snippet(GetVar(default_link),
+    "value=Open Folder",
+    "onclick=shell C:\Program Files\Olex2-1.5/util/pyUtil/PluginLib//plugin-StructTimer",
+    )$-
+  </td>
+<!-- #include row_table_off gui\blocks\row_table_off.htm;1; -->

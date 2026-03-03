@@ -1,0 +1,51 @@
+
+<!-- #include tool-top gui/blocks/tool-top.htm;image=#image;onclick=#onclick;1; -->
+<tr>
+  <td ALIGN='left' width='100%' colspan='3' style='padding:8px;'>
+    <b style='font-size:110%;'>StructTimer - Per-Molecule Time Tracking</b>
+  </td>
+</tr>
+
+<tr>
+  <td ALIGN='left' width='100%' colspan='3' style='padding:4px;'>
+    <b>Current Molecule:</b>
+  </td>
+</tr>
+
+<tr>
+  <td ALIGN='left' width='100%' colspan='3' style='padding:4px;'>
+    $spy.StructTimer.get_molecule_name()
+  </td>
+</tr>
+
+<tr>
+  <td colspan='3'>
+    <table width='100%' border='0' cellpadding='8' cellspacing='0'>
+      <tr>
+        <td width='33%' align='left'>
+          <b>Work Time</b><br/>
+          $spy.StructTimer.get_work_time() s
+        </td>
+        <td width='33%' align='left'>
+          <b>Idle Time</b><br/>
+          $spy.StructTimer.get_idle_time() s
+        </td>
+        <td width='34%' align='left'>
+          <b>Total Time</b><br/>
+          $spy.StructTimer.get_running_time() s
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+
+<tr>
+  <td ALIGN='left' width='100%' colspan='3'>
+    <a href="spy.StructTimer.refresh_display()"><b>↻ Refresh</b></a>
+  </td>
+</tr>
+
+
+<!-- #include h3-StructTimer-extras $GetVar(StructTimer_plugin_path)\h3-StructTimer-extras.htm;gui\blocks\tool-h3-off.htm;image=h3-Timing-History;onclick=;colspan=3;1; -->
+
+<!-- #include tool-footer gui/blocks/tool-footer.htm;colspan=3;1; -->

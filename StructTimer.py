@@ -1,0 +1,392 @@
+
+from olexFunctions import OlexFunctions
+OV = OlexFunctions()
+
+import os
+import htmlTools
+import olex
+import olx
+import gui
+import olex_gui
+
+import time
+import json
+debug = bool(OV.GetParam("olex2.debug", False))
+
+
+instance_path = OV.DataDir()
+
+try:
+  from_outside = False
+  p_path = os.path.dirname(os.path.abspath(__file__))
+except:
+  from_outside = True
+  p_path = os.path.dirname(os.path.abspath("__file__"))
+
+l = open(os.sep.join([p_path, 'def.txt'])).readlines()
+d = {}
+for line in l:
+  line = line.strip()
+  if not line or line.startswith("#"):
+    continue
+  d[line.split("=")[0].strip()] = line.split("=")[1].strip()
+
+p_name = d['p_name']
+p_htm = d['p_htm']
+p_img = eval(d['p_img'])
+p_scope = d['p_scope']
+
+OV.SetVar('StructTimer_plugin_path', p_path)
+
+from PluginTools import PluginTools as PT
+
+class StructTimer(PT):
+
+  def __init__(self):
+    super(StructTimer, self).__init__()
+    self.p_name = p_name
+    self.p_path = p_path
+    self.p_scope = p_scope
+    self.p_htm = p_htm
+    self.p_img = p_img
+    self.deal_with_phil(operation='read')
+    self.print_version_date()
+    
+    # Initialize per-molecule timing system
+    self.timing_data_file = os.path.join(instance_path, 'structtimer_history.json')
+    self.molecule_timings = self.load_timing_data()
+    self.current_molecule = None
+    self.current_start_time = None
+    self.current_idle_start = None
+    self._last_auto_save = time.time()
+    self._save_interval = 10  # Auto-save every 10 seconds
+    
+    OV.registerFunction(self.print_formula,True,"StructTimer")
+    OV.registerFunction(self.get_idle_time,True,"StructTimer")
+    OV.registerFunction(self.get_work_time,True,"StructTimer")
+    OV.registerFunction(self.get_running_time,True,"StructTimer")
+    OV.registerFunction(self.get_molecule_name,True,"StructTimer")
+    OV.registerFunction(self.get_timing_history,True,"StructTimer")
+    OV.registerFunction(self.update_timing,True,"StructTimer")
+    OV.registerFunction(self.reset_current_timing,True,"StructTimer")
+    OV.registerFunction(self.refresh_display,True,"StructTimer")
+    if not from_outside:
+      self.setup_gui()
+    # END Generated =======================================
+
+  def load_timing_data(self):
+    """Load timing history from JSON file"""
+    try:
+      if os.path.exists(self.timing_data_file):
+        with open(self.timing_data_file, 'r') as f:
+          return json.load(f)
+      else:
+        return {}
+    except:
+      return {}
+  
+  def save_timing_data(self):
+    """Save timing history to JSON file"""
+    try:
+      with open(self.timing_data_file, 'w') as f:
+        json.dump(self.molecule_timings, f, indent=2)
+    except Exception as e:
+      print("Error saving timing data: %s" % str(e))
+  
+  def check_and_switch_molecule(self):
+    """Check if molecule has changed and switch timing context"""
+    mol_name = self._get_molecule_name_internal()
+    
+    # Periodic auto-save (every 10 seconds)
+    if time.time() - self._last_auto_save > self._save_interval:
+      if self.current_molecule and self.current_molecule != "No structure loaded":
+        self.save_current_molecule_timing()
+      self._last_auto_save = time.time()
+    
+    if mol_name != self.current_molecule:
+      # Save current molecule timing if exists
+      if self.current_molecule and self.current_molecule != "No structure loaded":
+        self.save_current_molecule_timing()
+      
+      # Switch to new molecule
+      self.current_molecule = mol_name
+      if mol_name != "No structure loaded":
+        if mol_name not in self.molecule_timings:
+          self.molecule_timings[mol_name] = {
+            'total_work_time': 0.0,
+            'total_idle_time': 0.0,
+            'total_run_time': 0.0,
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+          }
+          self.save_timing_data()
+        self.current_start_time = time.time()
+        olex_gui.ResetIdleTime()
+    else:
+      # Same molecule, ensure it exists in timings
+      if mol_name != "No structure loaded" and mol_name not in self.molecule_timings:
+        self.molecule_timings[mol_name] = {
+          'total_work_time': 0.0,
+          'total_idle_time': 0.0,
+          'total_run_time': 0.0,
+          'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        self.save_timing_data()
+        if self.current_start_time is None:
+          self.current_start_time = time.time()
+          olex_gui.ResetIdleTime()
+  
+  def save_current_molecule_timing(self):
+    """Save timing for current molecule"""
+    if not self.current_molecule or self.current_molecule == "No structure loaded":
+      return
+    
+    if self.current_start_time is not None:
+      elapsed = time.time() - self.current_start_time
+      idle = olex_gui.GetIdleTime()
+      work = max(0, elapsed - idle)
+      
+      if self.current_molecule in self.molecule_timings:
+        self.molecule_timings[self.current_molecule]['total_work_time'] += work
+        self.molecule_timings[self.current_molecule]['total_idle_time'] += idle
+        self.molecule_timings[self.current_molecule]['total_run_time'] += elapsed
+        self.molecule_timings[self.current_molecule]['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
+      
+      self.save_timing_data()
+      
+      # Reset timers to avoid double-counting
+      self.current_start_time = time.time()
+      olex_gui.ResetIdleTime()
+  
+  def _get_molecule_name_internal(self):
+    """Internal method to get molecule name"""
+    try:
+      file_name = olx.FileName()
+      if file_name:
+        name = os.path.splitext(os.path.basename(file_name))[0]
+        return name if name else "No structure loaded"
+      else:
+        return "No structure loaded"
+    except:
+      return "No structure loaded"
+
+  def print_formula(self):
+    self.check_and_switch_molecule()
+    formula = {}
+    for element in str(olx.xf.GetFormula('list')).split(','):
+      element_type, n = element.split(':')
+      print("%s: %s" %(element_type, n))
+      formula.setdefault(element_type, float(n))
+      
+    print("Molecule: %s" % self.current_molecule)
+    print("Idle time: %.1f" %(self.get_idle_time()))
+    print("Work time: %.1f" %(self.get_work_time()))
+    print("Running time: %.1f"  %(self.get_running_time()))
+    try:
+      olx.html.Update()
+    except:
+      try:
+        olex.m("html.Update()")
+      except:
+        pass
+
+  def get_idle_time(self):
+    """Get idle time for current molecule"""
+    self.check_and_switch_molecule()
+    try:
+      if self.current_molecule == "No structure loaded" or self.current_molecule is None:
+        return 0.0
+      current_idle = olex_gui.GetIdleTime()
+      total_idle = self.molecule_timings.get(self.current_molecule, {}).get('total_idle_time', 0.0)
+      return round(float(total_idle + current_idle), 1)
+    except Exception as e:
+      if debug:
+        print("Error in get_idle_time: %s" % str(e))
+      return 0.0
+  
+  def get_work_time(self):
+    """Get work time for current molecule"""
+    self.check_and_switch_molecule()
+    try:
+      if self.current_molecule == "No structure loaded" or self.current_molecule is None:
+        return 0.0
+      if self.current_start_time is None:
+        # Timer not started yet, initialize it
+        self.current_start_time = time.time()
+        olex_gui.ResetIdleTime()
+        if debug:
+          print("Timer started for: %s" % self.current_molecule)
+        return 0.0
+      elapsed = time.time() - self.current_start_time
+      idle = olex_gui.GetIdleTime()
+      work = max(0, elapsed - idle)
+      total_work = self.molecule_timings.get(self.current_molecule, {}).get('total_work_time', 0.0)
+      result = round(float(total_work + work), 1)
+      if debug:
+        print("Work time for %s: %.1f (session: %.1f + saved: %.1f)" % (self.current_molecule, result, work, total_work))
+      return result
+    except Exception as e:
+      if debug:
+        print("Error in get_work_time: %s" % str(e))
+      return 0.0
+  
+  def get_running_time(self):
+    """Get running time for current molecule"""
+    self.check_and_switch_molecule()
+    try:
+      if self.current_molecule == "No structure loaded" or self.current_molecule is None:
+        return 0.0
+      if self.current_start_time is None:
+        # Timer not started yet, initialize it
+        self.current_start_time = time.time()
+        olex_gui.ResetIdleTime()
+        return 0.0
+      elapsed = time.time() - self.current_start_time
+      total_run = self.molecule_timings.get(self.current_molecule, {}).get('total_run_time', 0.0)
+      return round(float(total_run + elapsed), 1)
+    except Exception as e:
+      if debug:
+        print("Error in get_running_time: %s" % str(e))
+      return 0.0
+  
+  def get_molecule_name(self):
+    """Get the current structure/molecule name"""
+    self.check_and_switch_molecule()
+    return self.current_molecule if self.current_molecule else "No structure loaded"
+  
+  def update_timing(self):
+    """Force update and save current molecule timing"""
+    self.check_and_switch_molecule()
+    self.save_current_molecule_timing()
+    try:
+      olx.html.Update()
+    except:
+      pass
+    return "Timing saved and updated"
+  
+  def refresh_display(self):
+    """Refresh the display to show current timing"""
+    self.check_and_switch_molecule()
+    try:
+      olx.html.Update()
+    except:
+      pass
+    return "Display refreshed"
+  
+  def reset_current_timing(self):
+    """Reset timing for current molecule"""
+    mol_name = self._get_molecule_name_internal()
+    if mol_name and mol_name != "No structure loaded":
+      if mol_name in self.molecule_timings:
+        del self.molecule_timings[mol_name]
+        self.save_timing_data()
+      self.current_start_time = time.time()
+      self.current_idle_start = 0
+      olex_gui.ResetIdleTime()
+      try:
+        olx.html.Update()
+      except:
+        pass
+      return "Timing reset for %s" % mol_name
+    return "No structure loaded"
+  
+  def get_timing_history(self):
+    """Get formatted HTML table of timing history for all molecules"""
+    self.check_and_switch_molecule()
+    
+    # Get current session times
+    current_work = 0.0
+    current_idle = 0.0
+    current_total = 0.0
+    
+    if self.current_molecule and self.current_molecule != "No structure loaded" and self.current_start_time is not None:
+      elapsed = time.time() - self.current_start_time
+      idle = olex_gui.GetIdleTime()
+      current_work = max(0, elapsed - idle)
+      current_idle = idle
+      current_total = elapsed
+    
+    # Collect all molecules to display (including current even if not in history)
+    molecules_to_show = {}
+    
+    # Add all saved molecules
+    for mol_name, data in self.molecule_timings.items():
+      molecules_to_show[mol_name] = {
+        'work': data.get('total_work_time', 0.0),
+        'idle': data.get('total_idle_time', 0.0),
+        'total': data.get('total_run_time', 0.0),
+        'updated': data.get('last_updated', 'Unknown'),
+        'is_current': False
+      }
+    
+    # Add or update current molecule
+    if self.current_molecule and self.current_molecule != "No structure loaded":
+      if self.current_molecule in molecules_to_show:
+        molecules_to_show[self.current_molecule]['work'] += current_work
+        molecules_to_show[self.current_molecule]['idle'] += current_idle
+        molecules_to_show[self.current_molecule]['total'] += current_total
+        molecules_to_show[self.current_molecule]['updated'] = "Active Now"
+        molecules_to_show[self.current_molecule]['is_current'] = True
+      else:
+        # Current molecule not in history yet, show it anyway
+        molecules_to_show[self.current_molecule] = {
+          'work': current_work,
+          'idle': current_idle,
+          'total': current_total,
+          'updated': "Active Now",
+          'is_current': True
+        }
+    
+    if not molecules_to_show:
+      return "<tr><td colspan='5' style='text-align:center;'>No timing data available.<br/>Load a structure to start tracking.</td></tr>"
+    
+    html_rows = []
+    # Sort by current first, then by last updated
+    sorted_molecules = sorted(
+      molecules_to_show.items(),
+      key=lambda x: (not x[1]['is_current'], x[1]['updated'] if x[1]['updated'] != "Active Now" else "9999"),
+      reverse=True
+    )
+    
+    for mol_name, data in sorted_molecules:
+      work_str = self._format_time(data['work'])
+      idle_str = self._format_time(data['idle'])
+      total_str = self._format_time(data['total'])
+      
+      # Highlight current molecule
+      bg_color = "#e8f4f8" if data['is_current'] else "#ffffff"
+      
+      html_rows.append(
+        "<tr style='background-color: %s;'>" % bg_color +
+        "<td width='30%%' style='padding:6px;'><b>%s</b></td>" % mol_name +
+        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % work_str +
+        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % idle_str +
+        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % total_str +
+        "<td width='16%%' style='padding:6px; text-align:center;'>%s</td>" % data['updated'] +
+        "</tr>"
+      )
+    
+    return "\n".join(html_rows)
+  
+  def _format_time(self, seconds):
+    """Format seconds as HH:MM:SS"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    return "%02d:%02d:%02d" % (hours, minutes, secs)
+
+StructTimer_instance = StructTimer()
+print("StructTimer loaded OK.")
+
+# Initialize timing for any loaded structure
+try:
+  StructTimer_instance.check_and_switch_molecule()
+  mol = StructTimer_instance.current_molecule
+  if mol and mol != "No structure loaded":
+    print("Timing started for molecule: %s" % mol)
+  else:
+    print("No structure loaded yet. Timer will start when structure is loaded.")
+except Exception as e:
+  print("Error initializing StructTimer: %s" % str(e))
+
+
+
