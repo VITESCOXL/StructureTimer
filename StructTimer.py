@@ -70,9 +70,19 @@ class StructTimer(PT):
     OV.registerFunction(self.update_timing,True,"StructTimer")
     OV.registerFunction(self.reset_current_timing,True,"StructTimer")
     OV.registerFunction(self.refresh_display,True,"StructTimer")
+    OV.registerFunction(self.get_session_time,True,"StructTimer")
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
+
+    # Auto-start: begin session timer immediately on GUI launch
+    self.session_start_time = time.time()
+
+    # Auto-start: register callback so timer starts whenever a structure is opened
+    self._register_file_listener()
+
+    # Auto-start: initialise timing for any structure already loaded at startup
+    self.check_and_switch_molecule()
 
   def load_timing_data(self):
     """Load timing history from JSON file"""
@@ -92,7 +102,48 @@ class StructTimer(PT):
         json.dump(self.molecule_timings, f, indent=2)
     except Exception as e:
       print("Error saving timing data: %s" % str(e))
-  
+
+  # ------------------------------------------------------------------
+  # Auto-start helpers
+  # ------------------------------------------------------------------
+
+  def _register_file_listener(self):
+    """Register onto olx.FileChangeListeners so the timer auto-starts
+    whenever a structure is opened in Olex2."""
+    try:
+      if not hasattr(olx, 'FileChangeListeners'):
+        olx.FileChangeListeners = []
+      if self._on_file_changed not in olx.FileChangeListeners:
+        olx.FileChangeListeners.append(self._on_file_changed)
+      if debug:
+        print("StructTimer: file-change listener registered")
+    except Exception as e:
+      print("StructTimer: could not register file-change listener: %s" % str(e))
+
+  def _on_file_changed(self, filetype):
+    """Called automatically by Olex2 whenever a structure is opened.
+    This is what makes the timer auto-start on file load."""
+    try:
+      self.check_and_switch_molecule()
+      if self.current_molecule and self.current_molecule != "No structure loaded":
+        print("StructTimer: auto-started timing for '%s'" % self.current_molecule)
+      try:
+        olx.html.Update()
+      except:
+        pass
+    except Exception as e:
+      if debug:
+        print("StructTimer _on_file_changed error: %s" % str(e))
+
+  def get_session_time(self):
+    """Return the total seconds since Olex2 (the plugin) was launched."""
+    try:
+      return round(float(time.time() - self.session_start_time), 1)
+    except:
+      return 0.0
+
+  # ------------------------------------------------------------------
+
   def check_and_switch_molecule(self):
     """Check if molecule has changed and switch timing context"""
     mol_name = self._get_molecule_name_internal()
@@ -376,17 +427,8 @@ class StructTimer(PT):
 
 StructTimer_instance = StructTimer()
 print("StructTimer loaded OK.")
-
-# Initialize timing for any loaded structure
-try:
-  StructTimer_instance.check_and_switch_molecule()
-  mol = StructTimer_instance.current_molecule
-  if mol and mol != "No structure loaded":
-    print("Timing started for molecule: %s" % mol)
-  else:
-    print("No structure loaded yet. Timer will start when structure is loaded.")
-except Exception as e:
-  print("Error initializing StructTimer: %s" % str(e))
-
-
-
+mol = StructTimer_instance.current_molecule
+if mol and mol != "No structure loaded":
+  print("StructTimer: timing started for '%s'" % mol)
+else:
+  print("StructTimer: session timer running - timing will auto-start when a structure is opened.")
