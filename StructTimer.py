@@ -11,6 +11,10 @@ import olex_gui
 
 import time
 import json
+try:
+  from RunPrg import RunRefinementPrg
+except Exception:
+  RunRefinementPrg = None
 debug = bool(OV.GetParam("olex2.debug", False))
 
 
@@ -60,6 +64,8 @@ class StructTimer(PT):
     self.current_idle_start = None
     self._last_auto_save = time.time()
     self._save_interval = 10  # Auto-save every 10 seconds
+    self._session_refine_time = 0.0  # refine time accumulated since last save
+    self._orig_refine_run = None
     
     OV.registerFunction(self.print_formula,True,"StructTimer")
     OV.registerFunction(self.get_idle_time,True,"StructTimer")
@@ -71,6 +77,7 @@ class StructTimer(PT):
     OV.registerFunction(self.reset_current_timing,True,"StructTimer")
     OV.registerFunction(self.refresh_display,True,"StructTimer")
     OV.registerFunction(self.get_session_time,True,"StructTimer")
+    OV.registerFunction(self.get_refine_time,True,"StructTimer")
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
@@ -80,6 +87,9 @@ class StructTimer(PT):
 
     # Auto-start: register callback so timer starts whenever a structure is opened
     self._register_file_listener()
+
+    # Refine timing: wrap RunRefinementPrg.run to capture time directly
+    self._register_refine_timing()
 
     # Auto-start: initialise timing for any structure already loaded at startup
     self.check_and_switch_molecule()
@@ -121,8 +131,7 @@ class StructTimer(PT):
       print("StructTimer: could not register file-change listener: %s" % str(e))
 
   def _on_file_changed(self, filetype):
-    """Called automatically by Olex2 whenever a structure is opened.
-    This is what makes the timer auto-start on file load."""
+    """Called automatically by Olex2 whenever a structure is opened."""
     try:
       self.check_and_switch_molecule()
       if self.current_molecule and self.current_molecule != "No structure loaded":
@@ -135,10 +144,66 @@ class StructTimer(PT):
       if debug:
         print("StructTimer _on_file_changed error: %s" % str(e))
 
+  def _register_refine_timing(self):
+    """Wrap RunRefinementPrg.run so refinement time is captured synchronously.
+    Refinement blocks the main thread, so polling cannot work — only a wrap does."""
+    if RunRefinementPrg is None:
+      return
+    try:
+      timer = self
+      _orig = RunRefinementPrg.run
+      self._orig_refine_run = _orig
+
+      def _timed_run(rp_self):
+        start = time.time()
+        try:
+          return _orig(rp_self)
+        finally:
+          elapsed = max(0.0, time.time() - start)
+          timer._session_refine_time += elapsed
+          if debug:
+            print("StructTimer: refinement took %.1fs" % elapsed)
+
+      RunRefinementPrg.run = _timed_run
+      if debug:
+        print("StructTimer: RunRefinementPrg.run wrapped")
+    except Exception as e:
+      print("StructTimer: could not wrap RunRefinementPrg.run: %s" % str(e))
+
+  def _unregister_refine_timing(self):
+    """Restore original RunRefinementPrg.run."""
+    if RunRefinementPrg is not None and self._orig_refine_run is not None:
+      try:
+        RunRefinementPrg.run = self._orig_refine_run
+        self._orig_refine_run = None
+      except Exception as e:
+        if debug:
+          print("StructTimer: could not restore RunRefinementPrg.run: %s" % str(e))
+
+  def __del__(self):
+    """Restore RunRefinementPrg.run and save timing on unload."""
+    try:
+      self.save_current_molecule_timing()
+    except:
+      pass
+    self._unregister_refine_timing()
+
   def get_session_time(self):
     """Return the total seconds since Olex2 (the plugin) was launched."""
     try:
       return round(float(time.time() - self.session_start_time), 1)
+    except:
+      return 0.0
+
+  def get_refine_time(self):
+    """Get accumulated refinement time for current molecule."""
+    self.check_and_switch_molecule()
+    try:
+      mol = self.current_molecule
+      if not mol or mol == "No structure loaded":
+        return 0.0
+      saved = self.molecule_timings.get(mol, {}).get('total_refine_time', 0.0)
+      return round(float(saved + self._session_refine_time), 1)
     except:
       return 0.0
 
@@ -166,11 +231,13 @@ class StructTimer(PT):
           self.molecule_timings[mol_name] = {
             'total_work_time': 0.0,
             'total_idle_time': 0.0,
+            'total_refine_time': 0.0,
             'total_run_time': 0.0,
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
           }
           self.save_timing_data()
         self.current_start_time = time.time()
+        self._session_refine_time = 0.0
         olex_gui.ResetIdleTime()
     else:
       # Same molecule, ensure it exists in timings
@@ -178,6 +245,7 @@ class StructTimer(PT):
         self.molecule_timings[mol_name] = {
           'total_work_time': 0.0,
           'total_idle_time': 0.0,
+          'total_refine_time': 0.0,
           'total_run_time': 0.0,
           'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -194,11 +262,13 @@ class StructTimer(PT):
     if self.current_start_time is not None:
       elapsed = time.time() - self.current_start_time
       idle = olex_gui.GetIdleTime()
-      work = max(0, elapsed - idle)
+      work = max(0, elapsed - idle - self._session_refine_time)
       
       if self.current_molecule in self.molecule_timings:
         self.molecule_timings[self.current_molecule]['total_work_time'] += work
         self.molecule_timings[self.current_molecule]['total_idle_time'] += idle
+        self.molecule_timings[self.current_molecule]['total_refine_time'] = (
+          self.molecule_timings[self.current_molecule].get('total_refine_time', 0.0) + self._session_refine_time)
         self.molecule_timings[self.current_molecule]['total_run_time'] += elapsed
         self.molecule_timings[self.current_molecule]['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
       
@@ -207,6 +277,7 @@ class StructTimer(PT):
       # Reset timers to avoid double-counting
       self.current_start_time = time.time()
       olex_gui.ResetIdleTime()
+      self._session_refine_time = 0.0
   
   def _get_molecule_name_internal(self):
     """Internal method to get molecule name"""
@@ -269,7 +340,8 @@ class StructTimer(PT):
         return 0.0
       elapsed = time.time() - self.current_start_time
       idle = olex_gui.GetIdleTime()
-      work = max(0, elapsed - idle)
+      session_refine = self._session_refine_time
+      work = max(0, elapsed - idle - session_refine)
       total_work = self.molecule_timings.get(self.current_molecule, {}).get('total_work_time', 0.0)
       result = round(float(total_work + work), 1)
       if debug:
@@ -363,16 +435,21 @@ class StructTimer(PT):
     for mol_name, data in self.molecule_timings.items():
       molecules_to_show[mol_name] = {
         'work': data.get('total_work_time', 0.0),
+        'refine': data.get('total_refine_time', 0.0),
         'idle': data.get('total_idle_time', 0.0),
         'total': data.get('total_run_time', 0.0),
         'updated': data.get('last_updated', 'Unknown'),
         'is_current': False
       }
     
+    # Current session refine for display
+    current_session_refine = self._session_refine_time
+
     # Add or update current molecule
     if self.current_molecule and self.current_molecule != "No structure loaded":
       if self.current_molecule in molecules_to_show:
         molecules_to_show[self.current_molecule]['work'] += current_work
+        molecules_to_show[self.current_molecule]['refine'] += current_session_refine
         molecules_to_show[self.current_molecule]['idle'] += current_idle
         molecules_to_show[self.current_molecule]['total'] += current_total
         molecules_to_show[self.current_molecule]['updated'] = "Active Now"
@@ -381,6 +458,7 @@ class StructTimer(PT):
         # Current molecule not in history yet, show it anyway
         molecules_to_show[self.current_molecule] = {
           'work': current_work,
+          'refine': current_session_refine,
           'idle': current_idle,
           'total': current_total,
           'updated': "Active Now",
@@ -400,6 +478,7 @@ class StructTimer(PT):
     
     for mol_name, data in sorted_molecules:
       work_str = self._format_time(data['work'])
+      refine_str = self._format_time(data['refine'])
       idle_str = self._format_time(data['idle'])
       total_str = self._format_time(data['total'])
       
@@ -408,11 +487,12 @@ class StructTimer(PT):
       
       html_rows.append(
         "<tr style='background-color: %s;'>" % bg_color +
-        "<td width='30%%' style='padding:6px;'><b>%s</b></td>" % mol_name +
-        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % work_str +
-        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % idle_str +
-        "<td width='18%%' style='padding:6px; text-align:center;'>%s</td>" % total_str +
-        "<td width='16%%' style='padding:6px; text-align:center;'>%s</td>" % data['updated'] +
+        "<td width='25%%' style='padding:6px;'><b>%s</b></td>" % mol_name +
+        "<td width='15%%' style='padding:6px; text-align:center;'>%s</td>" % work_str +
+        "<td width='15%%' style='padding:6px; text-align:center;'>%s</td>" % refine_str +
+        "<td width='15%%' style='padding:6px; text-align:center;'>%s</td>" % idle_str +
+        "<td width='15%%' style='padding:6px; text-align:center;'>%s</td>" % total_str +
+        "<td width='15%%' style='padding:6px; text-align:center;'>%s</td>" % data['updated'] +
         "</tr>"
       )
     
