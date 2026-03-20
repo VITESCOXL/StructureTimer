@@ -1,0 +1,11 @@
+
+TimerPlus{
+  gui{
+    location = 'tools'
+      .type = str
+      .help = The tab item where the TimerPlus GUI shall appear.
+    before = 'images'
+      .type = str
+      .help = The tool before which the TimerPlus GUI shall appear.
+    }
+}

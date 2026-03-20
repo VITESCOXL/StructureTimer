@@ -1,5 +1,5 @@
 
-  p_name = StructTimer
-  p_htm = StructTimer
-  p_img = [("StructTimer",'h1'), ("StructTimer-Extras",'h3')]
-  p_scope = structtimer
+  p_name = TimerPlus
+  p_htm = TimerPlus
+  p_img = [(p_name,'h1'), ("TimerPlus-Extras",'h3')]
+  p_scope = TimerPlus

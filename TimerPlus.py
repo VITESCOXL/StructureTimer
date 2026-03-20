@@ -40,14 +40,14 @@ p_htm = d['p_htm']
 p_img = eval(d['p_img'])
 p_scope = d['p_scope']
 
-OV.SetVar('StructTimer_plugin_path', p_path)
+OV.SetVar('TimerPlus_plugin_path', p_path)
 
 from PluginTools import PluginTools as PT
 
-class StructTimer(PT):
+class TimerPlus(PT):
 
   def __init__(self):
-    super(StructTimer, self).__init__()
+    super(TimerPlus, self).__init__()
     self.p_name = p_name
     self.p_path = p_path
     self.p_scope = p_scope
@@ -57,7 +57,7 @@ class StructTimer(PT):
     self.print_version_date()
     
     # Initialize per-molecule timing system
-    self.timing_data_file = os.path.join(instance_path, 'structtimer_history.json')
+    self.timing_data_file = os.path.join(instance_path, 'TimerPlus_history.json')
     self.molecule_timings = self.load_timing_data()
     self.current_molecule = None
     self.current_start_time = None
@@ -67,17 +67,17 @@ class StructTimer(PT):
     self._session_refine_time = 0.0  # refine time accumulated since last save
     self._orig_refine_run = None
     
-    OV.registerFunction(self.print_formula,True,"StructTimer")
-    OV.registerFunction(self.get_idle_time,True,"StructTimer")
-    OV.registerFunction(self.get_work_time,True,"StructTimer")
-    OV.registerFunction(self.get_running_time,True,"StructTimer")
-    OV.registerFunction(self.get_molecule_name,True,"StructTimer")
-    OV.registerFunction(self.get_timing_history,True,"StructTimer")
-    OV.registerFunction(self.update_timing,True,"StructTimer")
-    OV.registerFunction(self.reset_current_timing,True,"StructTimer")
-    OV.registerFunction(self.refresh_display,True,"StructTimer")
-    OV.registerFunction(self.get_session_time,True,"StructTimer")
-    OV.registerFunction(self.get_refine_time,True,"StructTimer")
+    OV.registerFunction(self.print_formula,True,"TimerPlus")
+    OV.registerFunction(self.get_idle_time,True,"TimerPlus")
+    OV.registerFunction(self.get_work_time,True,"TimerPlus")
+    OV.registerFunction(self.get_running_time,True,"TimerPlus")
+    OV.registerFunction(self.get_molecule_name,True,"TimerPlus")
+    OV.registerFunction(self.get_timing_history,True,"TimerPlus")
+    OV.registerFunction(self.update_timing,True,"TimerPlus")
+    OV.registerFunction(self.reset_current_timing,True,"TimerPlus")
+    OV.registerFunction(self.refresh_display,True,"TimerPlus")
+    OV.registerFunction(self.get_session_time,True,"TimerPlus")
+    OV.registerFunction(self.get_refine_time,True,"TimerPlus")
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
@@ -126,23 +126,23 @@ class StructTimer(PT):
       if self._on_file_changed not in olx.FileChangeListeners:
         olx.FileChangeListeners.append(self._on_file_changed)
       if debug:
-        print("StructTimer: file-change listener registered")
+        print("TimerPlus: file-change listener registered")
     except Exception as e:
-      print("StructTimer: could not register file-change listener: %s" % str(e))
+      print("TimerPlus: could not register file-change listener: %s" % str(e))
 
   def _on_file_changed(self, filetype):
     """Called automatically by Olex2 whenever a structure is opened."""
     try:
       self.check_and_switch_molecule()
       if self.current_molecule and self.current_molecule != "No structure loaded":
-        print("StructTimer: auto-started timing for '%s'" % self.current_molecule)
+        print("TimerPlus: auto-started timing for '%s'" % self.current_molecule)
       try:
         olx.html.Update()
       except:
         pass
     except Exception as e:
       if debug:
-        print("StructTimer _on_file_changed error: %s" % str(e))
+        print("TimerPlus _on_file_changed error: %s" % str(e))
 
   def _register_refine_timing(self):
     """Wrap RunRefinementPrg.run so refinement time is captured synchronously.
@@ -162,13 +162,13 @@ class StructTimer(PT):
           elapsed = max(0.0, time.time() - start)
           timer._session_refine_time += elapsed
           if debug:
-            print("StructTimer: refinement took %.1fs" % elapsed)
+            print("TimerPlus: refinement took %.1fs" % elapsed)
 
       RunRefinementPrg.run = _timed_run
       if debug:
-        print("StructTimer: RunRefinementPrg.run wrapped")
+        print("TimerPlus: RunRefinementPrg.run wrapped")
     except Exception as e:
-      print("StructTimer: could not wrap RunRefinementPrg.run: %s" % str(e))
+      print("TimerPlus: could not wrap RunRefinementPrg.run: %s" % str(e))
 
   def _unregister_refine_timing(self):
     """Restore original RunRefinementPrg.run."""
@@ -178,7 +178,7 @@ class StructTimer(PT):
         self._orig_refine_run = None
       except Exception as e:
         if debug:
-          print("StructTimer: could not restore RunRefinementPrg.run: %s" % str(e))
+          print("TimerPlus: could not restore RunRefinementPrg.run: %s" % str(e))
 
   def __del__(self):
     """Restore RunRefinementPrg.run and save timing on unload."""
@@ -466,7 +466,7 @@ class StructTimer(PT):
         }
     
     if not molecules_to_show:
-      return "<tr><td colspan='5' style='text-align:center;'>No timing data available.<br/>Load a structure to start tracking.</td></tr>"
+      return "<tr><td style='text-align:center;'>No timing data available.<br/>Load a structure to start tracking.</td></tr>"
     
     html_rows = []
     # Sort by current first, then by last updated
@@ -505,10 +505,10 @@ class StructTimer(PT):
     secs = int(seconds % 60)
     return "%02d:%02d:%02d" % (hours, minutes, secs)
 
-StructTimer_instance = StructTimer()
-print("StructTimer loaded OK.")
-mol = StructTimer_instance.current_molecule
+TimerPlus_instance = TimerPlus()
+print("TimerPlus loaded OK.")
+mol = TimerPlus_instance.current_molecule
 if mol and mol != "No structure loaded":
-  print("StructTimer: timing started for '%s'" % mol)
+  print("TimerPlus: timing started for '%s'" % mol)
 else:
-  print("StructTimer: session timer running - timing will auto-start when a structure is opened.")
+  print("TimerPlus: session timer running - timing will auto-start when a structure is opened.")
