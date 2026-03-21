@@ -11,6 +11,8 @@ import olex_gui
 
 import time
 import json
+import uuid
+
 try:
   from RunPrg import RunRefinementPrg
 except Exception:
@@ -67,17 +69,17 @@ class TimerPlus(PT):
     self._session_refine_time = 0.0  # refine time accumulated since last save
     self._orig_refine_run = None
     
-    OV.registerFunction(self.print_formula,True,"TimerPlus")
-    OV.registerFunction(self.get_idle_time,True,"TimerPlus")
-    OV.registerFunction(self.get_work_time,True,"TimerPlus")
-    OV.registerFunction(self.get_running_time,True,"TimerPlus")
-    OV.registerFunction(self.get_molecule_name,True,"TimerPlus")
-    OV.registerFunction(self.get_timing_history,True,"TimerPlus")
-    OV.registerFunction(self.update_timing,True,"TimerPlus")
-    OV.registerFunction(self.reset_current_timing,True,"TimerPlus")
-    OV.registerFunction(self.refresh_display,True,"TimerPlus")
-    OV.registerFunction(self.get_session_time,True,"TimerPlus")
-    OV.registerFunction(self.get_refine_time,True,"TimerPlus")
+    OV.registerFunction(self.print_formula,True,self.p_name)
+    OV.registerFunction(self.get_idle_time,True,self.p_name)
+    OV.registerFunction(self.get_work_time,True,self.p_name)
+    OV.registerFunction(self.get_running_time,True,self.p_name)
+    OV.registerFunction(self.get_molecule_name,True,self.p_name)
+    OV.registerFunction(self.get_timing_history,True,self.p_name)
+    OV.registerFunction(self.update_timing,True,self.p_name)
+    OV.registerFunction(self.reset_current_timing,True,self.p_name)
+    OV.registerFunction(self.refresh_display,True,self.p_name)
+    OV.registerFunction(self.get_session_time,True,self.p_name)
+    OV.registerFunction(self.get_refine_time,True,self.p_name)
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
@@ -112,6 +114,16 @@ class TimerPlus(PT):
         json.dump(self.molecule_timings, f, indent=2)
     except Exception as e:
       print("Error saving timing data: %s" % str(e))
+
+    """Save current molecule to local JSON file"""
+    try:
+      fn = os.path.join(OV.StrDir(), f"{OV.ModelSrc()}_timer.json")
+      with open(fn, 'w') as f:
+        json.dump(self.molecule_timings[self.current_molecule], f, indent=2)
+    except Exception as e:
+      print("Error saving local timing data: %s" % str(e))
+
+
 
   # ------------------------------------------------------------------
   # Auto-start helpers
@@ -233,6 +245,9 @@ class TimerPlus(PT):
             'total_idle_time': 0.0,
             'total_refine_time': 0.0,
             'total_run_time': 0.0,
+            'filepath': "",
+            'sNum': OV.ModelSrc(),
+            'uuid': str(uuid.uuid4()),
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
           }
           self.save_timing_data()
@@ -271,7 +286,9 @@ class TimerPlus(PT):
           self.molecule_timings[self.current_molecule].get('total_refine_time', 0.0) + self._session_refine_time)
         self.molecule_timings[self.current_molecule]['total_run_time'] += elapsed
         self.molecule_timings[self.current_molecule]['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
-      
+        self.molecule_timings[self.current_molecule].setdefault('filepath', OV.FilePath())
+        self.molecule_timings[self.current_molecule].setdefault('sNum', OV.ModelSrc())
+        self.molecule_timings[self.current_molecule].setdefault('uuid', str(uuid.uuid4()))
       self.save_timing_data()
       
       # Reset timers to avoid double-counting
@@ -282,9 +299,9 @@ class TimerPlus(PT):
   def _get_molecule_name_internal(self):
     """Internal method to get molecule name"""
     try:
-      file_name = olx.FileName()
-      if file_name:
-        name = os.path.splitext(os.path.basename(file_name))[0]
+      sNum, path = get_sNum_and_path()
+      if sNum:
+        name = sNum
         return name if name else "No structure loaded"
       else:
         return "No structure loaded"
@@ -504,6 +521,43 @@ class TimerPlus(PT):
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
     return "%02d:%02d:%02d" % (hours, minutes, secs)
+  
+
+  def get_or_create_structure(directory, name):
+    json_path = os.path.join(directory, f"{name}_worklog.json")
+    
+    if os.path.exists(json_path):
+      with open(json_path) as f:
+        data = json.load(f)
+      uuid = data["structure_uuid"]
+    else:
+      uuid = str(uuid4())
+      # JSON will be written when the first session is recorded
+    
+    conn = DBConnection().conn
+    row = conn.execute(
+      "SELECT id, directory FROM structure WHERE uuid = ?", (uuid,)
+    ).fetchone()
+    
+    if row:
+      struct_id, known_dir = row
+      if os.path.normpath(known_dir) != os.path.normpath(directory):
+        logger.info("Structure %r moved from %r to %r.", name, known_dir, directory)
+        conn.execute(
+          "UPDATE structure SET directory = ?, name = ? WHERE id = ?",
+          (directory, name, struct_id)
+        )
+        conn.commit()
+      return struct_id
+    
+    # First time this structure has been seen by the DB
+    cursor = conn.execute(
+      "INSERT INTO structure (uuid, directory, name) VALUES (?, ?, ?)",
+      (uuid, directory, name)
+    )
+    conn.commit()
+    return cursor.lastrowid  
+  
 
 TimerPlus_instance = TimerPlus()
 print("TimerPlus loaded OK.")
@@ -512,3 +566,14 @@ if mol and mol != "No structure loaded":
   print("TimerPlus: timing started for '%s'" % mol)
 else:
   print("TimerPlus: session timer running - timing will auto-start when a structure is opened.")
+  
+def get_sNum_and_path():
+  """Return a stable, globally unique identifier for the current structure."""
+  if olx.IsFileType("ires") == 'true':
+    sNum = OV.ModelSrc()
+  else:
+    sNum = olx.xf.DataName(int(olx.xf.CurrentData()))
+  # Combine with the directory to make it globally unique
+  directory = os.path.normpath(OV.FilePath())
+  return sNum, directory  
+  
