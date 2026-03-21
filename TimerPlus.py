@@ -286,8 +286,8 @@ class TimerPlus(PT):
           self.molecule_timings[self.current_molecule].get('total_refine_time', 0.0) + self._session_refine_time)
         self.molecule_timings[self.current_molecule]['total_run_time'] += elapsed
         self.molecule_timings[self.current_molecule]['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
-        self.molecule_timings[self.current_molecule].setdefault('filepath', OV.FilePath())
-        self.molecule_timings[self.current_molecule].setdefault('sNum', OV.ModelSrc())
+        self.molecule_timings[self.current_molecule].setdefault('sNumPath', self.sNumPath)
+        self.molecule_timings[self.current_molecule].setdefault('sNum', self.sNum)
         self.molecule_timings[self.current_molecule].setdefault('uuid', str(uuid.uuid4()))
       self.save_timing_data()
       
@@ -299,8 +299,10 @@ class TimerPlus(PT):
   def _get_molecule_name_internal(self):
     """Internal method to get molecule name"""
     try:
-      sNum, path = get_sNum_and_path()
+      sNum, sNumPath = get_sNum_and_path()
       if sNum:
+        self.sNum = sNum
+        self.sNumPath = sNumPath
         name = sNum
         return name if name else "No structure loaded"
       else:
