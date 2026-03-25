@@ -18,26 +18,30 @@
 
 <!-- #include tool-row-help gui/blocks/tool-row-help.htm;name=StructureTimer_2; help_ext=StructureTimer_2;1; -->
 
-    <table width='100%' border='0' cellpadding='8' cellspacing='0'>
-      <tr>
-        <td width='25%' align='left'>
-          <b>Work Time</b><br/>
-          $spy.TimerPlus.get_work_time() s
-        </td>
-        <td width='25%' align='left'>
-          <b>Refine Time</b><br/>
-          $spy.TimerPlus.get_refine_time() s
-        </td>
-        <td width='25%' align='left'>
-          <b>Idle Time</b><br/>
-          $spy.TimerPlus.get_idle_time() s
-        </td>
-        <td width='25%' align='left'>
-          <b>Total Time</b><br/>
-          $spy.TimerPlus.get_running_time() s
-        </td>
-      </tr>
-    </table>
+  <td ALIGN='left' width='25%' style='padding:2px 4px;'>
+    <b>Molecule:</b>
+    <snippet src="gui/snippets/input-label"
+      name="TIMER_MOL"
+      value="GetVar(TIMER_MOL)"/>
+  </td>
+  <td ALIGN='left' width='25%' style='padding:2px 4px;'>
+    <b>Work:</b>
+    <snippet src="gui/snippets/input-label"
+      name="TIMER_WORK"
+      value="GetVar(TIMER_WORK)"/>
+  </td>
+  <td ALIGN='left' width='25%' style='padding:2px 4px;'>
+    <b>Refine:</b>
+    <snippet src="gui/snippets/input-label"
+      name="TIMER_REFINE"
+      value="GetVar(TIMER_REFINE)"/>
+  </td>
+  <td ALIGN='left' width='25%' style='padding:2px 4px;'>
+    <b>Run:</b>
+    <snippet src="gui/snippets/input-label"
+      name="TIMER_RUN"
+      value="GetVar(TIMER_RUN)"/>
+  </td>
 
 <!-- #include row_table_off gui/blocks/row_table_off.htm;1; -->
 

@@ -83,6 +83,7 @@ class TimerPlus(PT):
     OV.registerFunction(self.get_session_time,True,self.p_name)
     OV.registerFunction(self.get_refine_time,True,self.p_name)
     OV.registerFunction(self.get_work_time_for_dataset,True,self.p_name)
+    OV.registerFunction(self.update_timer_vars,True,self.p_name)
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
@@ -98,6 +99,11 @@ class TimerPlus(PT):
 
     # Auto-start: initialise timing for any structure already loaded at startup
     self.check_and_switch_molecule()
+
+    # Initialise display variables so the HTML panel never shows missing-var errors
+    for _var in ('TIMER_MOL', 'TIMER_WORK', 'TIMER_REFINE', 'TIMER_RUN'):
+      OV.SetVar(_var, '')
+    self.update_timer_vars()
 
     # Patch multiple datasets so work-time badges appear in multi-CIF dataset buttons
     self._patch_multiple_dataset()
@@ -149,7 +155,7 @@ class TimerPlus(PT):
       print("Error saving timing data: %s" % str(e))
 
     """Save every tracked molecule to its own local _timer.json in its sNumPath directory."""
-    for mol_name, mol_data in self.molecule_timings.items():
+    for mol_name, mol_data in list(self.molecule_timings.items()):
       try:
         strdir = mol_data.get('sNumPath') or OV.StrDir()
         if not strdir:
@@ -438,19 +444,33 @@ class TimerPlus(PT):
     """Force update and save current molecule timing"""
     self.check_and_switch_molecule()
     self.save_current_molecule_timing()
-    try:
-      olx.html.Update()
-    except:
-      pass
     return "Timing saved and updated"
   
+  def update_timer_vars(self):
+    self.check_and_switch_molecule()
+    mol = self.current_molecule
+    if not mol or mol == "No structure loaded":
+      return
+    OV.SetVar('TIMER_MOL', mol)
+    try:
+      OV.SetControlValue('TIMER_MOL', mol)
+    except Exception:
+      pass
+    l = ["WORK", "REFINE", "RUN"]
+    for item in l:
+      _ = self.molecule_timings[mol].get(f'total_{item.lower()}_time', 0.0)
+      t = f"{int(_//3600):02d}:{int((_% 3600)//60):02d}:{int(_%60):02d}"
+      ctrl = f'TIMER_{item}'
+      OV.SetVar(ctrl, t)
+      try:
+        OV.SetControlValue(ctrl, t)
+      except Exception:
+        pass
+
   def refresh_display(self):
     """Refresh the display to show current timing"""
     self.check_and_switch_molecule()
-    try:
-      olx.html.Update()
-    except:
-      pass
+    self.update_timer_vars()
     return "Display refreshed"
   
   def reset_current_timing(self):
