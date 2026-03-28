@@ -1,4 +1,3 @@
-
 from olexFunctions import OlexFunctions
 OV = OlexFunctions()
 
@@ -12,12 +11,10 @@ import olex_gui
 import time
 import json
 import uuid
-
 try:
   from RunPrg import RunRefinementPrg
 except Exception:
   RunRefinementPrg = None
-debug = bool(OV.GetParam("olex2.debug", False))
 
 
 instance_path = OV.DataDir()
@@ -70,6 +67,8 @@ class TimerPlus(PT):
     self._orig_refine_run = None
     self.sNumPath = None
     self.sNum = None
+    self._refresh_interval = None
+    self._refresh_active = False
     
     OV.registerFunction(self.print_formula,True,self.p_name)
     OV.registerFunction(self.get_idle_time,True,self.p_name)
@@ -84,6 +83,7 @@ class TimerPlus(PT):
     OV.registerFunction(self.get_refine_time,True,self.p_name)
     OV.registerFunction(self.get_work_time_for_dataset,True,self.p_name)
     OV.registerFunction(self.update_timer_vars,True,self.p_name)
+    OV.registerFunction(self._tick,True,self.p_name)
     if not from_outside:
       self.setup_gui()
     # END Generated =======================================
@@ -108,6 +108,9 @@ class TimerPlus(PT):
     # Patch multiple datasets so work-time badges appear in multi-CIF dataset buttons
     self._patch_multiple_dataset()
 
+    # Start recurring display refresh based on phil refresh_interval
+    self._start_refresh_timer()
+
   def _patch_multiple_dataset(self):
     try:
       import gui.home as home_module
@@ -130,8 +133,6 @@ class TimerPlus(PT):
 
         mds.list_datasets = patched_list_datasets
         mds._timerplus_patched = True
-        if debug:
-          print('TimerPlus: patched mds.list_datasets')
     except Exception as e:
       print('TimerPlus: could not patch mds: %s' % str(e))
 
@@ -163,10 +164,9 @@ class TimerPlus(PT):
         fn = os.path.join(strdir, '%s_timer.json' % mol_name)
         with open(fn, 'w') as f:
           json.dump(mol_data, f, indent=2)
-        if debug:
-          print("TimerPlus: saved %s_timer.json to %s" % (mol_name, strdir))
       except Exception as e:
         print("Error saving local timing data for %s: %s" % (mol_name, str(e)))
+
 
 
 
@@ -182,8 +182,6 @@ class TimerPlus(PT):
         olx.FileChangeListeners = []
       if self._on_file_changed not in olx.FileChangeListeners:
         olx.FileChangeListeners.append(self._on_file_changed)
-      if debug:
-        print("TimerPlus: file-change listener registered")
     except Exception as e:
       print("TimerPlus: could not register file-change listener: %s" % str(e))
 
@@ -198,8 +196,7 @@ class TimerPlus(PT):
       except:
         pass
     except Exception as e:
-      if debug:
-        print("TimerPlus _on_file_changed error: %s" % str(e))
+      pass
 
   def _register_refine_timing(self):
     """Wrap RunRefinementPrg.run so refinement time is captured synchronously.
@@ -218,12 +215,8 @@ class TimerPlus(PT):
         finally:
           elapsed = max(0.0, time.time() - start)
           timer._session_refine_time += elapsed
-          if debug:
-            print("TimerPlus: refinement took %.1fs" % elapsed)
 
       RunRefinementPrg.run = _timed_run
-      if debug:
-        print("TimerPlus: RunRefinementPrg.run wrapped")
     except Exception as e:
       print("TimerPlus: could not wrap RunRefinementPrg.run: %s" % str(e))
 
@@ -233,12 +226,42 @@ class TimerPlus(PT):
       try:
         RunRefinementPrg.run = self._orig_refine_run
         self._orig_refine_run = None
-      except Exception as e:
-        if debug:
-          print("TimerPlus: could not restore RunRefinementPrg.run: %s" % str(e))
+      except Exception:
+        pass
+
+  def _start_refresh_timer(self):
+    """Schedule recurring display refresh using olx.Schedule"""
+    try:
+      interval = int(OV.GetParam('TimerPlus.refresh_interval', 3))
+    except Exception:
+      interval = 3
+    if interval <= 0:
+      self._stop_refresh_timer()
+      return
+    self._refresh_interval = interval
+    self._refresh_active = True
+    olx.Schedule(interval, "spy.TimerPlus._tick()")
+    print("TimerPlus: olx.Schedule refresh started (interval=%s)" % str(interval))
+
+  def _tick(self):
+    """Called by olx.Schedule"""
+    if not self._refresh_active:
+      return
+    try:
+      self.refresh_display()
+    except Exception:
+      pass
+    if self._refresh_active and self._refresh_interval and self._refresh_interval > 0:
+      olx.Schedule(self._refresh_interval, "spy.TimerPlus._tick()")
+
+  def _stop_refresh_timer(self):
+    self._refresh_active = False
+
+  
 
   def __del__(self):
     """Restore RunRefinementPrg.run and save timing on unload."""
+    self._stop_refresh_timer()
     try:
       self.save_current_molecule_timing()
     except:
@@ -384,9 +407,7 @@ class TimerPlus(PT):
       current_idle = olex_gui.GetIdleTime()
       total_idle = self.molecule_timings.get(self.current_molecule, {}).get('total_idle_time', 0.0)
       return round(float(total_idle + current_idle), 1)
-    except Exception as e:
-      if debug:
-        print("Error in get_idle_time: %s" % str(e))
+    except Exception:
       return 0.0
   
   def get_work_time(self):
@@ -396,11 +417,8 @@ class TimerPlus(PT):
       if self.current_molecule == "No structure loaded" or self.current_molecule is None:
         return 0.0
       if self.current_start_time is None:
-        # Timer not started yet, initialize it
         self.current_start_time = time.time()
         olex_gui.ResetIdleTime()
-        if debug:
-          print("Timer started for: %s" % self.current_molecule)
         return 0.0
       elapsed = time.time() - self.current_start_time
       idle = olex_gui.GetIdleTime()
@@ -408,12 +426,8 @@ class TimerPlus(PT):
       work = max(0, elapsed - idle - session_refine)
       total_work = self.molecule_timings.get(self.current_molecule, {}).get('total_work_time', 0.0)
       result = round(float(total_work + work), 1)
-      if debug:
-        print("Work time for %s: %.1f (session: %.1f + saved: %.1f)" % (self.current_molecule, result, work, total_work))
       return result
-    except Exception as e:
-      if debug:
-        print("Error in get_work_time: %s" % str(e))
+    except Exception:
       return 0.0
   
   def get_running_time(self):
@@ -430,9 +444,7 @@ class TimerPlus(PT):
       elapsed = time.time() - self.current_start_time
       total_run = self.molecule_timings.get(self.current_molecule, {}).get('total_run_time', 0.0)
       return round(float(total_run + elapsed), 1)
-    except Exception as e:
-      if debug:
-        print("Error in get_running_time: %s" % str(e))
+    except Exception:
       return 0.0
   
   def get_molecule_name(self):
@@ -471,6 +483,7 @@ class TimerPlus(PT):
     """Refresh the display to show current timing"""
     self.check_and_switch_molecule()
     self.update_timer_vars()
+    olx.html.Update()
     return "Display refreshed"
   
   def reset_current_timing(self):
